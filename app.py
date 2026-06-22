@@ -5,6 +5,7 @@ import re
 
 app = Flask(__name__)
 
+# Essential Stremio CORS rule fix
 @app.after_request
 def add_cors_headers(response):
     response.headers['Access-Control-Allow-Origin'] = '*'
@@ -15,7 +16,7 @@ def add_cors_headers(response):
 def manifest():
     return jsonify({
         "id": "com.torrentfreak.top10.movies",
-        "version": "1.0.2",
+        "version": "1.1.0",
         "name": "TorrentFreak Top 10 Movies",
         "description": "Weekly catalog of the top 10 most torrented movies from TorrentFreak.",
         "resources": ["catalog"],
@@ -33,68 +34,64 @@ def manifest():
 @app.route('/catalog/movie/tf_top_10.json')
 def catalog():
     url = "https://torrentfreak.com/top-10-most-torrented-pirated-movies/"
-    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
-    
-    # Precise hardcoded fallback registry for rows missing clean links
-    fallback_ids = {
-        "mortal kombat ii": "tt19864802",
-        "the devil wears prada 2": "tt20862024",
-        "office romance": "tt0076706"
-    }
+    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
     
     try:
         response = requests.get(url, headers=headers, timeout=10)
         soup = BeautifulSoup(response.text, 'html.parser')
         metas = []
 
-        # Find the rows inside TorrentFreak's tables
+        # Target all table rows on the page
         rows = soup.select('table tr')
 
         for row in rows:
             cells = row.find_all('td')
             
+            # Ensure it is a valid data row with at least 3 columns
             if len(cells) >= 3:
-                # Confirm it's a list item row by checking for a numerical rank
+                # Rule 1: Verify cell 0 contains a clean numerical rank (1-10)
                 rank_text = cells[0].text.strip()
                 if not re.match(r'^\d+$', rank_text):
                     continue
                 
-                # Fetch the clean title directly from column index 2
-                title = cells[2].text.strip()
-                if not title:
-                    continue
-                
-                # Strip clean any leftover list characters
-                title = re.sub(r'^\d+\.\s*', '', title)
-                
-                # Find the IMDb ID specifically inside THIS row's link tags
+                # Rule 2: Dynamically find the IMDb ID anywhere inside this specific row
                 imdb_id = None
                 for link in row.find_all('a', href=True):
                     href = link['href']
                     imdb_match = re.search(r'tt\d+', href)
                     if imdb_match:
                         imdb_id = imdb_match.group(0)
-                        break # Grab the first valid movie link found in the row
+                        break  # Found the ID, move to text extraction
                 
-                # Apply fallback mapping if TorrentFreak omitted the link
-                if not imdb_id:
-                    imdb_id = fallback_ids.get(title.lower())
+                # Rule 3: Extract and clean up the title from the 3rd column (cells[2])
+                raw_title = cells[2].text.strip()
+                if not raw_title:
+                    continue
                 
-                if imdb_id:
+                # Clean up TorrentFreak's structural text:
+                # Remove ratings patterns (e.g., "7.6", "6.9") and "/ trailer" suffixes cleanly
+                clean_title = re.sub(r'\b\d+\.\d+\b', '', raw_title)  # Strips decimal ratings
+                clean_title = re.sub(r'\s*/\s*trailer.*$', '', clean_title, flags=re.IGNORECASE)  # Strips "/ trailer"
+                clean_title = re.sub(r'^\d+\.\s*', '', clean_title)  # Strips any "1. " prefixes
+                clean_title = clean_title.strip()  # Clear out remaining surrounding spaces
+                
+                # Rule 4: Append only if we have both a valid title and a found IMDb ID
+                if imdb_id and clean_title:
                     metas.append({
                         "id": imdb_id,
                         "type": "movie",
-                        "name": title,
+                        "name": clean_title,
                         "poster": f"https://btttr.cc/poster/imdb/poster-default/{imdb_id}.jpg"
                     })
                         
+            # Stop parsing immediately once we fill our top 10 catalog spots in order
             if len(metas) >= 10:
                 break
 
         return jsonify({"metas": metas})
         
     except Exception as e:
-        print(f"Error scraping data: {e}")
+        print(f"Scraper error encountered: {e}")
         return jsonify({"metas": []})
 
 if __name__ == '__main__':
