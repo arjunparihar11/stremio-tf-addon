@@ -57,20 +57,27 @@ def catalog():
                 if imdb_match:
                     imdb_id = imdb_match.group(0)
                     
-                    # Target all cells within this row to grab the correct text columns
+                    # Target all cells within this row
                     cells = row.find_all('td')
-                    if len(cells) >= 2:
-                        # TorrentFreak puts the true movie title text inside the second column
-                        title = cells[1].text.strip()
+                    
+                    # TorrentFreak Columns: 
+                    # cells[0] = This Week's Rank
+                    # cells[1] = Last Week's Rank (e.g. "(1)", "(..)")
+                    # cells[2] = True Movie Title
+                    if len(cells) >= 3:
+                        title = cells[2].text.strip()
                         
-                        # Strip away any lingering ranking numbers (e.g., "1. Movie Title" -> "Movie Title")
+                        # Fallback defense: if column 2 is somehow short or empty, try column 1
+                        if not title or len(title) <= 4 and ('(' in title or '.' in title):
+                            title = cells[1].text.strip()
+                        
+                        # Clean up any lingering rank numbers just in case
                         title = re.sub(r'^\d+\.\s*', '', title) 
                         
                         metas.append({
                             "id": imdb_id,
                             "type": "movie",
                             "name": title,
-                            # Styled overlay posters via btttr.cc
                             "poster": f"https://btttr.cc/poster/imdb/poster-default/{imdb_id}.jpg"
                         })
                         
