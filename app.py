@@ -43,27 +43,40 @@ def catalog():
         soup = BeautifulSoup(response.text, 'html.parser')
         metas = []
 
-        # TorrentFreak puts their top 10 movie list links directly to IMDb in their tables
-        links = soup.select('table tr td a[href*="imdb.com/title/"]')
+        # Find all table rows across the TorrentFreak page
+        rows = soup.select('table tr')
 
-        for link in links[:10]:  # Cap it at top 10
-            title = link.text.strip()
-            href = link.get('href', '')
+        for row in rows:
+            # Find the cell that contains the hyperlink pointing to IMDb
+            imdb_link = row.find('a', href=re.compile(r'imdb\.com/title/tt\d+'))
             
-            # Extract the 'ttXXXXXXX' ID from the IMDb link url
-            imdb_match = re.search(r'tt\d+', href)
-            if imdb_match and title:
-                imdb_id = imdb_match.group(0)
+            if imdb_link:
+                href = imdb_link.get('href', '')
+                imdb_match = re.search(r'tt\d+', href)
                 
-                # By passing Stremio the proper IMDb ID, Stremio's internal engine (Cinemeta)
-                # automatically pulls the high-res movie posters directly for you!
-                metas.append({
-    			"id": imdb_id,
-    			"type": "movie",
-    			"name": title,
-    			# Updated to pull dynamic Better Posters directly from btttr.cc
-    			"poster": f"https://btttr.cc/poster/imdb/poster-default/{imdb_id}.jpg"
-		})
+                if imdb_match:
+                    imdb_id = imdb_match.group(0)
+                    
+                    # Target all cells within this row to grab the correct text columns
+                    cells = row.find_all('td')
+                    if len(cells) >= 2:
+                        # TorrentFreak puts the true movie title text inside the second column
+                        title = cells[1].text.strip()
+                        
+                        # Strip away any lingering ranking numbers (e.g., "1. Movie Title" -> "Movie Title")
+                        title = re.sub(r'^\d+\.\s*', '', title) 
+                        
+                        metas.append({
+                            "id": imdb_id,
+                            "type": "movie",
+                            "name": title,
+                            # Styled overlay posters via btttr.cc
+                            "poster": f"https://btttr.cc/poster/imdb/poster-default/{imdb_id}.jpg"
+                        })
+                        
+            # Prevent going over the Top 10 limit 
+            if len(metas) >= 10:
+                break
 
         return jsonify({"metas": metas})
         
