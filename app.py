@@ -15,7 +15,7 @@ def add_cors_headers(response):
 def manifest():
     return jsonify({
         "id": "com.torrentfreak.top10.movies",
-        "version": "1.0.1",
+        "version": "1.0.2",
         "name": "TorrentFreak Top 10 Movies",
         "description": "Weekly catalog of the top 10 most torrented movies from TorrentFreak.",
         "resources": ["catalog"],
@@ -35,9 +35,10 @@ def catalog():
     url = "https://torrentfreak.com/top-10-most-torrented-pirated-movies/"
     headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
     
-    # Hardcoded fallback mappings for titles missing explicit IMDb links on TorrentFreak's table right now
+    # Precise hardcoded fallback registry for rows missing clean links
     fallback_ids = {
         "mortal kombat ii": "tt19864802",
+        "the devil wears prada 2": "tt20862024",
         "office romance": "tt0076706"
     }
     
@@ -46,42 +47,39 @@ def catalog():
         soup = BeautifulSoup(response.text, 'html.parser')
         metas = []
 
-        # Target the precise rows inside TorrentFreak's actual data tables
+        # Find the rows inside TorrentFreak's tables
         rows = soup.select('table tr')
 
         for row in rows:
             cells = row.find_all('td')
             
-            # Make sure it's a valid data row containing enough columns
             if len(cells) >= 3:
-                # Check if the first cell starts with a number to verify it's part of the top 10 list
+                # Confirm it's a list item row by checking for a numerical rank
                 rank_text = cells[0].text.strip()
                 if not re.match(r'^\d+$', rank_text):
                     continue
                 
-                # Column 2 is the true movie title text
+                # Fetch the clean title directly from column index 2
                 title = cells[2].text.strip()
                 if not title:
                     continue
-
-                # Clean up any lingering rank headers inside text
+                
+                # Strip clean any leftover list characters
                 title = re.sub(r'^\d+\.\s*', '', title)
                 
-                # Look for an IMDb hyperlink anywhere inside this specific row
-                imdb_link = row.find('a', href=re.compile(r'imdb\.com/title/tt\d+'))
+                # Find the IMDb ID specifically inside THIS row's link tags
                 imdb_id = None
-                
-                if imdb_link:
-                    href = imdb_link.get('href', '')
+                for link in row.find_all('a', href=True):
+                    href = link['href']
                     imdb_match = re.search(r'tt\d+', href)
                     if imdb_match:
                         imdb_id = imdb_match.group(0)
+                        break # Grab the first valid movie link found in the row
                 
-                # If TorrentFreak didn't link it, use our static map registry fallback
+                # Apply fallback mapping if TorrentFreak omitted the link
                 if not imdb_id:
                     imdb_id = fallback_ids.get(title.lower())
                 
-                # Only append if an ID was successfully resolved
                 if imdb_id:
                     metas.append({
                         "id": imdb_id,
@@ -90,14 +88,13 @@ def catalog():
                         "poster": f"https://btttr.cc/poster/imdb/poster-default/{imdb_id}.jpg"
                     })
                         
-            # Ensure we strictly gather up to 10 entries sequentially
             if len(metas) >= 10:
                 break
 
         return jsonify({"metas": metas})
         
     except Exception as e:
-        print(f"Error scraping: {e}")
+        print(f"Error scraping data: {e}")
         return jsonify({"metas": []})
 
 if __name__ == '__main__':
